@@ -1,0 +1,20 @@
+[package]
+name = "usbctl"
+version = "0.1.0"
+authors = ["mexus <gilaldpellaeon@gmail.com>"]
+edition = "2018"
+license = "Apache-2.0/MIT"
+description = "A tool to turn on and off usb devices in Linux "
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+caps = "0.5.1"
+structopt = "0.3"
+nix = "0.20"
+log = "0.4"
+libc = "0.2"
+anyhow = "1"
+display-error-chain = "0.1"
+maplit = "1"
+fern = "0.6"
