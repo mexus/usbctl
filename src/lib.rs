@@ -23,6 +23,16 @@ impl Device {
         fs::write(path, self.port.as_os_str().as_bytes())
             .with_context(|| format!("Unable to write to {}", path.display()))
     }
+
+    /// Checks if either device name or device port matches the `search` string.
+    pub fn matches(&self, search: &str, exact: bool) -> bool {
+        let port = self.port.to_string_lossy();
+        if exact {
+            port == search || self.name == search
+        } else {
+            port.contains(search) || self.name.contains(search)
+        }
+    }
 }
 
 impl fmt::Display for Device {
@@ -43,12 +53,7 @@ impl fmt::Display for Device {
 pub fn find_device(search: &str, exact: bool) -> anyhow::Result<Option<Device>> {
     for device in discover_devices()? {
         let device = device?;
-        let port = device.port.to_string_lossy();
-        if exact {
-            if port == search || device.name == search {
-                return Ok(Some(device));
-            }
-        } else if port.contains(search) || device.name.contains(search) {
+        if device.matches(search, exact) {
             return Ok(Some(device));
         }
     }

@@ -31,7 +31,7 @@ enum Command {
     /// Turn on a device.
     On {
         /// A search string. It is matches against both port and device name.
-        search: String,
+        search: Vec<String>,
 
         /// Matches only when port or name matches the search string exactly.
         #[structopt(short, long)]
@@ -40,7 +40,7 @@ enum Command {
     /// Turn off a device.
     Off {
         /// A search string. It is matches against both port and device name.
-        search: String,
+        search: Vec<String>,
 
         /// Matches only when port or name matches the search string exactly.
         #[structopt(short, long)]
@@ -133,43 +133,70 @@ fn run() -> anyhow::Result<()> {
             }
         }
         Command::On { search, exact } => {
-            let device = usbctl::find_device(&search, exact)
-                .with_context(|| format!("Looking for device at {:?}", search))?
-                .with_context(|| format!("Unable to find device {:?}", search))?;
-            if device.online {
-                log::warn!(
-                    r#"Refusing to turn on on inactive device "{}" at {:?}"#,
-                    device.name,
-                    device.port
-                )
-            } else {
-                device
-                    .on()
-                    .with_context(|| format!("Unable to turn on device {:?}", search))?;
-                log::info!(r#"Turned on device "{}" at {:?}"#, device.name, device.port);
+            for device in usbctl::discover_devices().context("Looking for devices")? {
+                let device = match device.context("Fetching device") {
+                    Ok(device) => device,
+                    Err(e) if is_not_found(&e) => {
+                        // Skip disappeared devices.
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
+                if search.iter().any(|search| device.matches(search, exact)) {
+                    if device.online {
+                        log::warn!(
+                            r#"Refusing to turn on an active device "{}" at {:?}"#,
+                            device.name,
+                            device.port
+                        )
+                    } else {
+                        device
+                            .on()
+                            .with_context(|| format!("Unable to turn on device {:?}", search))?;
+                        log::info!(r#"Turned on device "{}" at {:?}"#, device.name, device.port);
+                    }
+                }
             }
         }
         Command::Off { search, exact } => {
-            let device = usbctl::find_device(&search, exact)
-                .with_context(|| format!("Looking for device at {:?}", search))?
-                .with_context(|| format!("Unable to find device {:?}", search))?;
-            if !device.online {
-                log::warn!(
-                    r#"Refusing to turn off an inactive device "{}" at {:?}"#,
-                    device.name,
-                    device.port
-                )
-            } else {
-                device
-                    .off()
-                    .with_context(|| format!("Unable to turn off device {:?}", search))?;
-                log::info!(
-                    r#"Turned off device "{}" at {:?}"#,
-                    device.name,
-                    device.port
-                );
+            for device in usbctl::discover_devices().context("Looking for devices")? {
+                let device = match device.context("Fetching device") {
+                    Ok(device) => device,
+                    Err(e) if is_not_found(&e) => {
+                        // Skip disappeared devices.
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
+                if search.iter().any(|search| device.matches(search, exact)) {
+                    if !device.online {
+                        log::warn!(
+                            r#"Refusing to turn off an inactive device "{}" at {:?}"#,
+                            device.name,
+                            device.port
+                        )
+                    } else {
+                        device
+                            .off()
+                            .with_context(|| format!("Unable to turn off device {:?}", search))?;
+                        log::info!(
+                            r#"Turned off device "{}" at {:?}"#,
+                            device.name,
+                            device.port
+                        );
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+fn is_not_found(e: &anyhow::Error) -> bool {
+    let root_cause = e.root_cause();
+    if let Some(io) = root_cause.downcast_ref::<std::io::Error>() {
+        io.kind() == std::io::ErrorKind::NotFound
+    } else {
+        false
+    }
 }
