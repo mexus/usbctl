@@ -3,7 +3,7 @@ use display_error_chain::DisplayErrorChain;
 use log::LevelFilter;
 use nix::unistd::{getuid, setegid, seteuid, Gid, Uid};
 use structopt::StructOpt;
-use usbctl::actions::Action;
+use usbctl::actions::{Action, Filter};
 
 /// USB devices management.
 #[derive(StructOpt)]
@@ -19,6 +19,10 @@ struct Options {
     /// When run as root, drop privileges to the given group id.
     #[structopt(short = "g", env = "SUDO_GID", requires("uid"))]
     gid: Option<libc::gid_t>,
+
+    /// Debug output.
+    #[structopt(short, long)]
+    debug: bool,
 
     #[structopt(subcommand)]
     command: Command,
@@ -59,14 +63,16 @@ enum Command {
 }
 
 fn main() {
-    setup_logs();
-    if let Err(e) = run() {
+    let options = Options::from_args();
+    setup_logs(options.debug);
+    if let Err(e) = run(options) {
         log::error!("Terminating with error: {}", DisplayErrorChain::new(&*e));
         std::process::exit(1)
     }
 }
 
-fn setup_logs() {
+fn setup_logs(debug: bool) {
+    // Warnings and errors go to stderr.
     let errors = fern::Dispatch::new()
         .level(LevelFilter::Warn)
         .format(|out, message, record| {
@@ -78,17 +84,34 @@ fn setup_logs() {
             ))
         })
         .chain(fern::Output::stderr("\n"));
+    // Informational messages go to stdout.
     let infos = fern::Dispatch::new()
         .level(LevelFilter::Info)
         .filter(|meta| meta.level() > log::Level::Warn)
         .chain(fern::Output::stdout("\n"));
-    fern::Dispatch::new()
-        .chain(errors)
-        .chain(infos)
-        .apply()
-        .expect("Should not fail");
+    let mut cumulative_dispatcher = fern::Dispatch::new().chain(errors).chain(infos);
+    if debug {
+        // Debug messages go to stderr.
+        let debug = fern::Dispatch::new()
+            .level(LevelFilter::Debug)
+            .format(|out, message, record| {
+                out.finish(format_args!(
+                    "[{}] [{}] {}",
+                    record.target(),
+                    record.level(),
+                    message
+                ))
+            })
+            .filter(|meta| meta.level() >= log::Level::Debug)
+            .chain(fern::Output::stdout("\n"));
+        cumulative_dispatcher = cumulative_dispatcher.chain(debug);
+    }
+    cumulative_dispatcher.apply().expect("Should not fail");
 }
 
+/// Sets linux capabilities to the current process.
+///
+/// See `man 7 capabilities` for details.
 fn set_capabilities(capabilities: &caps::CapsHashSet) -> anyhow::Result<()> {
     use caps::CapSet::*;
     for &cap_set in &[Effective, Permitted] {
@@ -103,7 +126,11 @@ fn set_capabilities(capabilities: &caps::CapsHashSet) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Drops privileges by setting effective user id and group id of the current
+/// process to the provided ones.
 fn drop_privileges(uid: libc::uid_t, gid: libc::gid_t) -> anyhow::Result<()> {
+    debug_assert_ne!(uid, 0);
+    debug_assert_ne!(gid, 0);
     let uid = Uid::from_raw(uid);
     let gid = Gid::from_raw(gid);
 
@@ -113,15 +140,19 @@ fn drop_privileges(uid: libc::uid_t, gid: libc::gid_t) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run() -> anyhow::Result<()> {
-    let options = Options::from_args();
+fn run(options: Options) -> anyhow::Result<()> {
     if !options.root_is_ok && getuid().is_root() {
+        // When running as root, try to drop privileges while leaving the
+        // required capabilities.
         match (options.uid, options.gid) {
             (Some(uid), Some(gid)) => {
                 use caps::Capability::*;
+                // We need to keep CAP_SETGID and CAP_SETUID so far in order to
+                // change effective UID and GID.
                 set_capabilities(&(maplit::hashset![CAP_DAC_OVERRIDE, CAP_SETGID, CAP_SETUID]))
                     .context("Unable to set capabilities (phase 1)")?;
                 drop_privileges(uid, gid).context("Unable to drop privileges")?;
+                // Don't need CAP_SETGID and CAP_SETUID anymore.
                 set_capabilities(&(maplit::hashset![CAP_DAC_OVERRIDE]))
                     .context("Unable to set capabilities (phase 2)")?;
             }
@@ -149,9 +180,31 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Applies an action to filtered devices.
 fn apply(action: Action, search: Vec<String>, exact: bool) -> anyhow::Result<()> {
     usbctl::actions::Apply::new(usbctl::device::discover().context("Looking for devices")?)
-        .filter(|device| search.iter().any(|search| device.matches(search, exact)))
+        .filter(DeviceMatch::new(search, exact))
         .run(action)?;
     Ok(())
+}
+
+/// A simple filter that checks if a device matches any of the search strings.
+struct DeviceMatch {
+    search: Vec<String>,
+    exact: bool,
+}
+
+impl DeviceMatch {
+    /// Initializes a [DeviceMatch].
+    fn new(search: Vec<String>, exact: bool) -> Self {
+        Self { search, exact }
+    }
+}
+
+impl Filter for DeviceMatch {
+    fn filter(&mut self, device: &usbctl::device::Device) -> bool {
+        self.search
+            .iter()
+            .any(|search| device.matches(search, self.exact))
+    }
 }

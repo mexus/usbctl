@@ -61,9 +61,9 @@ where
     }
 
     /// Applies a filter to the the device list.
-    pub fn filter<Filter>(self, filter: Filter) -> Apply<Devices, Filter>
+    pub fn filter<F>(self, filter: F) -> Apply<Devices, F>
     where
-        Filter: FnMut(&Device) -> bool,
+        F: Filter,
     {
         Apply {
             devices: self.devices,
@@ -101,16 +101,16 @@ pub enum Error {
     },
 }
 
-impl<Devices, Filter> Apply<Devices, Filter>
+impl<Devices, F> Apply<Devices, F>
 where
     Devices: IntoIterator<Item = Result<Device, DiscoveryError>>,
-    Filter: FnMut(&Device) -> bool,
+    F: Filter,
 {
     /// Applies the given action to devices.
     pub fn run(mut self, action: Action) -> Result<(), Error> {
         for device in self.devices.into_iter() {
             let device = device.context(Fetch)?;
-            if (self.filter)(&device) {
+            if self.filter.filter(&device) {
                 log::debug!("Skipping {}", device);
                 continue;
             }
