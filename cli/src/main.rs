@@ -29,7 +29,7 @@ struct Options {
 enum Command {
     /// List available devices.
     List,
-    /// Turn on a device.
+    /// Turn on devices.
     On {
         /// A search string. It is matches against both port and device name.
         search: Vec<String>,
@@ -38,7 +38,7 @@ enum Command {
         #[structopt(short, long)]
         exact: bool,
     },
-    /// Turn off a device.
+    /// Turn off devices.
     Off {
         /// A search string. It is matches against both port and device name.
         search: Vec<String>,
@@ -47,7 +47,7 @@ enum Command {
         #[structopt(short, long)]
         exact: bool,
     },
-    /// Toggles a device.
+    /// Toggles devices.
     Toggle {
         /// A search string. It is matches against both port and device name.
         search: Vec<String>,
