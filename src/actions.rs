@@ -11,7 +11,7 @@ pub enum Action {
     On,
     /// Turns device off.
     Off,
-    /// When device is off, turns it off; when device is on, turns it on.
+    /// When device is off, turns it on; when device is on, turns it off.
     Toggle,
 }
 
