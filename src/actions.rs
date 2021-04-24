@@ -24,11 +24,28 @@ where
     filter: Filter,
 }
 
-/// No-op filter.
-pub type NoOpFilter = fn(&Device) -> bool;
+/// Device filter trait.
+pub trait Filter {
+    /// Checks if the given device should be yielded.
+    fn filter(&mut self, device: &Device) -> bool;
+}
 
-fn no_op_filter(_: &Device) -> bool {
-    true
+/// A no-op filter which yields all the supplied devices.
+#[derive(Debug, Default)]
+pub struct NoOpFilter(());
+
+impl Filter for NoOpFilter {
+    #[inline]
+    fn filter(&mut self, _device: &Device) -> bool {
+        true
+    }
+}
+
+impl<F: FnMut(&Device) -> bool> Filter for F {
+    #[inline]
+    fn filter(&mut self, device: &Device) -> bool {
+        (self)(device)
+    }
 }
 
 impl<Devices> Apply<Devices, NoOpFilter>
@@ -39,7 +56,7 @@ where
     pub fn new(devices: Devices) -> Self {
         Apply {
             devices,
-            filter: no_op_filter,
+            filter: NoOpFilter::default(),
         }
     }
 
