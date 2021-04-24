@@ -3,6 +3,7 @@ use display_error_chain::DisplayErrorChain;
 use log::LevelFilter;
 use nix::unistd::{getuid, setegid, seteuid, Gid, Uid};
 use structopt::StructOpt;
+use usbctl::actions::Action;
 
 /// USB devices management.
 #[derive(StructOpt)]
@@ -39,6 +40,15 @@ enum Command {
     },
     /// Turn off a device.
     Off {
+        /// A search string. It is matches against both port and device name.
+        search: Vec<String>,
+
+        /// Matches only when port or name matches the search string exactly.
+        #[structopt(short, long)]
+        exact: bool,
+    },
+    /// Toggles a device.
+    Toggle {
         /// A search string. It is matches against both port and device name.
         search: Vec<String>,
 
@@ -123,7 +133,7 @@ fn run() -> anyhow::Result<()> {
     }
     match options.command {
         Command::List => {
-            let devices = usbctl::discover_devices()
+            let devices = usbctl::device::discover()
                 .context("Looking for devices")?
                 .collect::<Result<Vec<_>, _>>()
                 .context("Collecting devices")?;
@@ -132,71 +142,16 @@ fn run() -> anyhow::Result<()> {
                 log::info!("{}", device);
             }
         }
-        Command::On { search, exact } => {
-            for device in usbctl::discover_devices().context("Looking for devices")? {
-                let device = match device.context("Fetching device") {
-                    Ok(device) => device,
-                    Err(e) if is_not_found(&e) => {
-                        // Skip disappeared devices.
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                };
-                if search.iter().any(|search| device.matches(search, exact)) {
-                    if device.online {
-                        log::warn!(
-                            r#"Refusing to turn on an active device "{}" at {:?}"#,
-                            device.name,
-                            device.port
-                        )
-                    } else {
-                        device
-                            .on()
-                            .with_context(|| format!("Unable to turn on device {:?}", search))?;
-                        log::info!(r#"Turned on device "{}" at {:?}"#, device.name, device.port);
-                    }
-                }
-            }
-        }
-        Command::Off { search, exact } => {
-            for device in usbctl::discover_devices().context("Looking for devices")? {
-                let device = match device.context("Fetching device") {
-                    Ok(device) => device,
-                    Err(e) if is_not_found(&e) => {
-                        // Skip disappeared devices.
-                        continue;
-                    }
-                    Err(e) => return Err(e),
-                };
-                if search.iter().any(|search| device.matches(search, exact)) {
-                    if !device.online {
-                        log::warn!(
-                            r#"Refusing to turn off an inactive device "{}" at {:?}"#,
-                            device.name,
-                            device.port
-                        )
-                    } else {
-                        device
-                            .off()
-                            .with_context(|| format!("Unable to turn off device {:?}", search))?;
-                        log::info!(
-                            r#"Turned off device "{}" at {:?}"#,
-                            device.name,
-                            device.port
-                        );
-                    }
-                }
-            }
-        }
+        Command::On { search, exact } => apply(Action::On, search, exact)?,
+        Command::Off { search, exact } => apply(Action::Off, search, exact)?,
+        Command::Toggle { search, exact } => apply(Action::Toggle, search, exact)?,
     }
     Ok(())
 }
 
-fn is_not_found(e: &anyhow::Error) -> bool {
-    let root_cause = e.root_cause();
-    if let Some(io) = root_cause.downcast_ref::<std::io::Error>() {
-        io.kind() == std::io::ErrorKind::NotFound
-    } else {
-        false
-    }
+fn apply(action: Action, search: Vec<String>, exact: bool) -> anyhow::Result<()> {
+    usbctl::actions::Apply::new(usbctl::device::discover().context("Looking for devices")?)
+        .filter(|device| search.iter().any(|search| device.matches(search, exact)))
+        .run(action)?;
+    Ok(())
 }
