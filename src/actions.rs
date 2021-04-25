@@ -138,13 +138,13 @@ where
                     );
                 }
                 (Action::On, Status::Offline) => {
-                    log::info!("Turning on {}", device);
+                    log::info!("Turning on {}", device.name);
                     if !self.dry_run {
                         device.on().context(TurnOn { device })?
                     }
                 }
                 (Action::Off, Status::Online) => {
-                    log::info!("Turning off {}", device);
+                    log::info!("Turning off {}", device.name);
                     if !self.dry_run {
                         device.off().context(TurnOff { device })?
                     }
@@ -157,13 +157,13 @@ where
                     );
                 }
                 (Action::Toggle, Status::Online) => {
-                    log::info!("Turning off {}", device);
+                    log::info!("Turning off {}", device.name);
                     if !self.dry_run {
                         device.off().context(TurnOff { device })?
                     }
                 }
                 (Action::Toggle, Status::Offline) => {
-                    log::info!("Turning on {}", device);
+                    log::info!("Turning on {}", device.name);
                     if !self.dry_run {
                         device.on().context(TurnOn { device })?
                     }
