@@ -24,6 +24,10 @@ struct Options {
     #[structopt(short, long)]
     debug: bool,
 
+    /// Enables "dry run" mode, when no real actions are performed.
+    #[structopt(long)]
+    dry_run: bool,
+
     #[structopt(subcommand)]
     command: Command,
 }
@@ -173,17 +177,18 @@ fn run(options: Options) -> anyhow::Result<()> {
                 log::info!("{}", device);
             }
         }
-        Command::On { search, exact } => apply(Action::On, search, exact)?,
-        Command::Off { search, exact } => apply(Action::Off, search, exact)?,
-        Command::Toggle { search, exact } => apply(Action::Toggle, search, exact)?,
+        Command::On { search, exact } => apply(Action::On, search, exact, options.dry_run)?,
+        Command::Off { search, exact } => apply(Action::Off, search, exact, options.dry_run)?,
+        Command::Toggle { search, exact } => apply(Action::Toggle, search, exact, options.dry_run)?,
     }
     Ok(())
 }
 
 /// Applies an action to filtered devices.
-fn apply(action: Action, search: Vec<String>, exact: bool) -> anyhow::Result<()> {
+fn apply(action: Action, search: Vec<String>, exact: bool, dry_run: bool) -> anyhow::Result<()> {
     usbctl::actions::Apply::new(usbctl::device::discover().context("Looking for devices")?)
         .filter(DeviceMatch::new(search, exact))
+        .dry_run(dry_run)
         .run(action)?;
     Ok(())
 }
@@ -203,7 +208,8 @@ impl DeviceMatch {
 
 impl Filter for DeviceMatch {
     fn filter(&mut self, device: &usbctl::device::Device) -> bool {
-        self.search
+        !self
+            .search
             .iter()
             .any(|search| device.matches(search, self.exact))
     }

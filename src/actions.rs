@@ -22,6 +22,7 @@ where
 {
     devices: Devices,
     filter: Filter,
+    dry_run: bool,
 }
 
 /// Device filter trait.
@@ -57,18 +58,32 @@ where
         Apply {
             devices,
             filter: NoOpFilter::default(),
+            dry_run: false,
         }
     }
+}
 
+impl<Devices, F> Apply<Devices, F>
+where
+    Devices: IntoIterator<Item = Result<Device, DiscoveryError>>,
+{
     /// Applies a filter to the the device list.
-    pub fn filter<F>(self, filter: F) -> Apply<Devices, F>
+    pub fn filter<NewFilter>(self, filter: NewFilter) -> Apply<Devices, NewFilter>
     where
-        F: Filter,
+        NewFilter: Filter,
     {
         Apply {
             devices: self.devices,
             filter,
+            dry_run: self.dry_run,
         }
+    }
+
+    /// Enables or disabled "dry run".
+    ///
+    /// When "dry run" is enabled, no real actions are performed.
+    pub fn dry_run(self, dry_run: bool) -> Self {
+        Apply { dry_run, ..self }
     }
 }
 
@@ -122,8 +137,18 @@ where
                         device.port
                     );
                 }
-                (Action::On, Status::Offline) => device.on().context(TurnOn { device })?,
-                (Action::Off, Status::Online) => device.off().context(TurnOff { device })?,
+                (Action::On, Status::Offline) => {
+                    log::info!("Turning on {}", device);
+                    if !self.dry_run {
+                        device.on().context(TurnOn { device })?
+                    }
+                }
+                (Action::Off, Status::Online) => {
+                    log::info!("Turning off {}", device);
+                    if !self.dry_run {
+                        device.off().context(TurnOff { device })?
+                    }
+                }
                 (Action::Off, Status::Offline) => {
                     log::warn!(
                         r#"Refusing to turn off an inactive device "{}" at {:?}"#,
@@ -131,8 +156,18 @@ where
                         device.port
                     );
                 }
-                (Action::Toggle, Status::Online) => device.off().context(TurnOff { device })?,
-                (Action::Toggle, Status::Offline) => device.on().context(TurnOn { device })?,
+                (Action::Toggle, Status::Online) => {
+                    log::info!("Turning off {}", device);
+                    if !self.dry_run {
+                        device.off().context(TurnOff { device })?
+                    }
+                }
+                (Action::Toggle, Status::Offline) => {
+                    log::info!("Turning on {}", device);
+                    if !self.dry_run {
+                        device.on().context(TurnOn { device })?
+                    }
+                }
             }
         }
         Ok(())
