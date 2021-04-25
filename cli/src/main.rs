@@ -24,10 +24,6 @@ struct Options {
     #[structopt(short, long)]
     debug: bool,
 
-    /// Enables "dry run" mode, when no real actions are performed.
-    #[structopt(long)]
-    dry_run: bool,
-
     /// Enables toggling "host" and "hub" devices.
     #[structopt(long)]
     allow_host: bool,
@@ -41,33 +37,38 @@ struct Options {
 enum Command {
     /// List available devices.
     List,
+
     /// Turn on devices.
     On {
-        /// A search string. It is matches against both port and device name.
-        search: Vec<String>,
-
-        /// Matches only when port or name matches the search string exactly.
-        #[structopt(short, long)]
-        exact: bool,
+        #[structopt(flatten)]
+        value: SearchOptions,
     },
+
     /// Turn off devices.
     Off {
-        /// A search string. It is matches against both port and device name.
-        search: Vec<String>,
-
-        /// Matches only when port or name matches the search string exactly.
-        #[structopt(short, long)]
-        exact: bool,
+        #[structopt(flatten)]
+        value: SearchOptions,
     },
+
     /// Toggles devices.
     Toggle {
-        /// A search string. It is matches against both port and device name.
-        search: Vec<String>,
-
-        /// Matches only when port or name matches the search string exactly.
-        #[structopt(short, long)]
-        exact: bool,
+        #[structopt(flatten)]
+        value: SearchOptions,
     },
+}
+
+#[derive(StructOpt)]
+struct SearchOptions {
+    /// A search string. It is matches against both port and device name.
+    search: Vec<String>,
+
+    /// Matches only when port or name matches the search string exactly.
+    #[structopt(short, long)]
+    exact: bool,
+
+    /// Enables "dry run" mode, when no real actions are performed.
+    #[structopt(long)]
+    dry_run: bool,
 }
 
 fn main() {
@@ -186,27 +187,9 @@ fn run(options: Options) -> anyhow::Result<()> {
                 log::info!("{}", device);
             }
         }
-        Command::On { search, exact } => apply(
-            Action::On,
-            search,
-            exact,
-            options.dry_run,
-            options.allow_host,
-        )?,
-        Command::Off { search, exact } => apply(
-            Action::Off,
-            search,
-            exact,
-            options.dry_run,
-            options.allow_host,
-        )?,
-        Command::Toggle { search, exact } => apply(
-            Action::Toggle,
-            search,
-            exact,
-            options.dry_run,
-            options.allow_host,
-        )?,
+        Command::On { value } => apply(Action::On, value, options.allow_host)?,
+        Command::Off { value } => apply(Action::Off, value, options.allow_host)?,
+        Command::Toggle { value } => apply(Action::Toggle, value, options.allow_host)?,
     }
     Ok(())
 }
@@ -214,9 +197,11 @@ fn run(options: Options) -> anyhow::Result<()> {
 /// Applies an action to filtered devices.
 fn apply(
     action: Action,
-    search: Vec<String>,
-    exact: bool,
-    dry_run: bool,
+    SearchOptions {
+        search,
+        exact,
+        dry_run,
+    }: SearchOptions,
     allow_host: bool,
 ) -> anyhow::Result<()> {
     usbctl::actions::Apply::new(usbctl::device::discover().context("Looking for devices")?)
@@ -246,7 +231,9 @@ impl DeviceMatch {
 
 impl Filter for DeviceMatch {
     fn filter(&mut self, device: &usbctl::device::Device) -> bool {
-        if !self.allow_host && (device.name.contains("Host") || device.name.contains("host")) {
+        if self.search.is_empty()
+            || !self.allow_host && (device.name.contains("Host") || device.name.contains("host"))
+        {
             false
         } else {
             self.search
