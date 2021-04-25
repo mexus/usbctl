@@ -4,6 +4,10 @@ use snafu::{ResultExt, Snafu};
 
 use crate::device::{Device, DiscoveryError, Status, StatusError};
 
+mod filter;
+
+pub use filter::{ChainFilter, ClosureFilter, Filter, FilterExt, NoOpFilter};
+
 /// An action applied to a device.
 #[derive(Debug, Clone, Copy)]
 pub enum Action {
@@ -23,30 +27,6 @@ where
     devices: Devices,
     filter: Filter,
     dry_run: bool,
-}
-
-/// Device filter trait.
-pub trait Filter {
-    /// Checks if the given device should be yielded.
-    fn filter(&mut self, device: &Device) -> bool;
-}
-
-/// A no-op filter which yields all the supplied devices.
-#[derive(Debug, Default)]
-pub struct NoOpFilter(());
-
-impl Filter for NoOpFilter {
-    #[inline]
-    fn filter(&mut self, _device: &Device) -> bool {
-        true
-    }
-}
-
-impl<F: FnMut(&Device) -> bool> Filter for F {
-    #[inline]
-    fn filter(&mut self, device: &Device) -> bool {
-        (self)(device)
-    }
 }
 
 impl<Devices> Apply<Devices, NoOpFilter>
@@ -125,8 +105,8 @@ where
     pub fn run(mut self, action: Action) -> Result<(), Error> {
         for device in self.devices.into_iter() {
             let device = device.context(Fetch)?;
-            if self.filter.filter(&device) {
-                log::debug!("Skipping {}", device);
+            if !self.filter.filter(&device) {
+                log::debug!("Skipped {}", device);
                 continue;
             }
             match (action, device.online) {

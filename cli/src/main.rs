@@ -28,6 +28,10 @@ struct Options {
     #[structopt(long)]
     dry_run: bool,
 
+    /// Enables toggling "host" and "hub" devices.
+    #[structopt(long)]
+    allow_host: bool,
+
     #[structopt(subcommand)]
     command: Command,
 }
@@ -174,20 +178,49 @@ fn run(options: Options) -> anyhow::Result<()> {
                 .context("Collecting devices")?;
             log::info!("Found {} device(s):", devices.len());
             for device in devices {
+                if !options.allow_host
+                    && (device.name.contains("Host") || device.name.contains("host"))
+                {
+                    continue;
+                }
                 log::info!("{}", device);
             }
         }
-        Command::On { search, exact } => apply(Action::On, search, exact, options.dry_run)?,
-        Command::Off { search, exact } => apply(Action::Off, search, exact, options.dry_run)?,
-        Command::Toggle { search, exact } => apply(Action::Toggle, search, exact, options.dry_run)?,
+        Command::On { search, exact } => apply(
+            Action::On,
+            search,
+            exact,
+            options.dry_run,
+            options.allow_host,
+        )?,
+        Command::Off { search, exact } => apply(
+            Action::Off,
+            search,
+            exact,
+            options.dry_run,
+            options.allow_host,
+        )?,
+        Command::Toggle { search, exact } => apply(
+            Action::Toggle,
+            search,
+            exact,
+            options.dry_run,
+            options.allow_host,
+        )?,
     }
     Ok(())
 }
 
 /// Applies an action to filtered devices.
-fn apply(action: Action, search: Vec<String>, exact: bool, dry_run: bool) -> anyhow::Result<()> {
+fn apply(
+    action: Action,
+    search: Vec<String>,
+    exact: bool,
+    dry_run: bool,
+    allow_host: bool,
+) -> anyhow::Result<()> {
     usbctl::actions::Apply::new(usbctl::device::discover().context("Looking for devices")?)
-        .filter(DeviceMatch::new(search, exact))
+        .filter(DeviceMatch::new(search, exact, allow_host))
         .dry_run(dry_run)
         .run(action)?;
     Ok(())
@@ -197,20 +230,28 @@ fn apply(action: Action, search: Vec<String>, exact: bool, dry_run: bool) -> any
 struct DeviceMatch {
     search: Vec<String>,
     exact: bool,
+    allow_host: bool,
 }
 
 impl DeviceMatch {
     /// Initializes a [DeviceMatch].
-    fn new(search: Vec<String>, exact: bool) -> Self {
-        Self { search, exact }
+    fn new(search: Vec<String>, exact: bool, allow_host: bool) -> Self {
+        Self {
+            search,
+            exact,
+            allow_host,
+        }
     }
 }
 
 impl Filter for DeviceMatch {
     fn filter(&mut self, device: &usbctl::device::Device) -> bool {
-        !self
-            .search
-            .iter()
-            .any(|search| device.matches(search, self.exact))
+        if !self.allow_host && (device.name.contains("Host") || device.name.contains("host")) {
+            false
+        } else {
+            self.search
+                .iter()
+                .any(|search| device.matches(search, self.exact))
+        }
     }
 }
